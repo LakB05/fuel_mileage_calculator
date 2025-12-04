@@ -1,1 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>BiFuel Mileage Tracker</title>
+<style>
+    body { background:#f4f4f4; font-family:Arial; padding:20px; }
+    .container {
+        max-width:700px; margin:auto; padding:20px;
+        background:white; border-radius:8px; box-shadow:0 0 10px #ccc;
+    }
+    input, select, button {
+        width:100%; padding:10px; margin-top:10px;
+        border-radius:5px; border:1px solid #ccc; font-size:16px;
+    }
+    button { background:#007bff; color:white; cursor:pointer; }
+    button:hover { background:#0056b3; }
+    table { width:100%; border-collapse:collapse; margin-top:20px; }
+    th,td { border:1px solid #ccc; padding:8px; text-align:center; }
+    .box { background:#fff3cd; padding:10px; border-left:4px solid #ffca2c; margin-bottom:20px; }
+    .result { display:none; background:#e6ffe6; padding:10px; border-left:4px solid green; margin-top:15px; }
+</style>
+</head>
+<body>
 
+<div class="container">
+
+    <h2>Bi-Fuel Mileage & Cost Calculator</h2>
+
+    <label>Fuel Type</label>
+    <select id="fuelType">
+        <option value="CNG">CNG (distance required)</option>
+        <option value="Petrol">Petrol (with or without distance)</option>
+    </select>
+
+    <div id="petrolNote" style="display:none;">
+        <label><input type="checkbox" id="petrolNoDistance"> Petrol used without distance (warm-up / idling)</label>
+    </div>
+
+    <label>Distance (km)</label>
+    <input type="number" id="distance">
+
+    <label>Fuel Used (kg for CNG / L for Petrol)</label>
+    <input type="number" id="fuelUsed">
+
+    <label>Fuel Price (per kg/liter)</label>
+    <input type="number" id="fuelPrice">
+
+    <button onclick="submitData()">Save Entry</button>
+
+    <div class="result" id="resultBox"></div>
+
+    <h3>Overall Stats</h3>
+    <div class="box" id="overallBox">Loading...</div>
+    <h3>Totals (Frontend Only)</h3>
+<div class="box" id="frontendTotals">Loading...</div>
+
+    <h3>Saved Logs</h3>
+    <table id="logTable">
+        <tr>
+            <th>Fuel</th>
+            <th>Distance</th>
+            <th>Fuel Used</th>
+            <th>Price</th>
+            <th>Mileage</th>
+            <th>Cost/km</th>
+            <th>Time</th>
+            <th> Delete </th>
+        </tr>
+    </table>
+
+</div>
+
+<script>
+document.getElementById("fuelType").addEventListener("change", function() {
+    document.getElementById("petrolNote").style.display =
+        this.value === "Petrol" ? "block" : "none";
+});
+async function deleteEntry(id) {
+    if (!confirm("Delete this entry?")) return;
+
+    let res = await fetch(`/api/logs/${id}`, { method: "DELETE" });
+
+    if (res.ok) {
+        loadLogs();
+        loadOverall();
+    } else {
+        alert("Failed to delete entry");
+    }
+}
+
+async function submitData() {
+    let fuelType = document.getElementById("fuelType").value;
+    let petrolNoDistance = document.getElementById("petrolNoDistance").checked;
+    let distance = document.getElementById("distance").value;
+    let fuelUsed = document.getElementById("fuelUsed").value;
+    let fuelPrice = document.getElementById("fuelPrice").value;
+
+    if (!fuelUsed || !fuelPrice) {
+        alert("Please enter fuel quantity and price!");
+        return;
+    }
+
+    if (fuelType === "CNG" && !distance) {
+        alert("CNG requires distance!");
+        return;
+    }
+
+    let payload = {
+        fuel_type: fuelType,
+        fuel_used: fuelUsed,
+        fuel_price: fuelPrice,
+        petrol_no_distance: petrolNoDistance
+    };
+
+    if (!petrolNoDistance || fuelType === "CNG") {
+        payload.distance = distance;
+    }
+
+    let res = await fetch("/api/logs", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload)
+    });
+
+    let data = await res.json();
+
+    let box = document.getElementById("resultBox");
+    box.style.display = "block";
+    box.innerHTML = `
+        <b>Mileage:</b> ${data.mileage.toFixed(2)} km/unit<br>
+        <b>Cost/km:</b> ₹${data.cost_per_km.toFixed(2)}
+    `;
+
+    loadLogs();
+    loadOverall();
+}
+
+async function loadLogs() {
+    let res = await fetch("/api/logs");
+    let logs = await res.json();
+
+    let table = document.getElementById("logTable");
+    table.innerHTML = `
+        <tr>
+            <th>Fuel</th>
+            <th>Distance</th>
+            <th>Fuel Used</th>
+            <th>Price</th>
+            <th>Mileage</th>
+            <th>Cost/km</th>
+            <th>Time</th>
+            <th>Delete</th>
+        </tr>
+    `;
+
+    let totalDistance = 0;
+    let totalFuel = 0;
+
+    logs.forEach(l => {
+        table.innerHTML += `
+            <tr>
+                <td>${l.fuel_type}</td>
+                <td>${l.distance}</td>
+                <td>${l.fuel_used}</td>
+                <td>${l.fuel_price}</td>
+                <td>${l.mileage.toFixed(2)}</td>
+                <td>${l.cost_per_km.toFixed(2)}</td>
+                <td>${l.timestamp}</td>
+                <td>
+                    <button 
+                        onclick="deleteEntry(${l.id})"
+                        style="background:red;color:white;padding:6px 10px;border:none;border-radius:5px;cursor:pointer;">
+                        Delete
+                    </button>
+                </td>
+            </tr>
+        `;
+
+        // frontend-only totals
+        totalDistance += parseFloat(l.distance);
+        totalFuel += parseFloat(l.fuel_used);
+    });
+
+    document.getElementById("frontendTotals").innerHTML = `
+        <b>Total Distance (CNG + Petrol with distance):</b> ${totalDistance.toFixed(2)} km<br>
+        <b>Total Fuel Consumed (Both fuels):</b> ${totalFuel.toFixed(2)} units
+    `;
+}
+
+
+async function loadOverall() {
+    let res = await fetch("/api/overall");
+    let stats = await res.json();
+
+    document.getElementById("overallBox").innerHTML = `
+        <b>Overall Mileage (CNG only):</b> ${stats.overall_mileage} km/kg<br>
+        <b>Overall Running Cost:</b> ₹${stats.overall_cost_per_km}/km
+    `;
+}
+
+loadLogs();
+loadOverall();
+</script>
+
+</body>
+</html>
